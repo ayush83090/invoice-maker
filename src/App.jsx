@@ -72,7 +72,7 @@ export default function App() {
     reader.readAsDataURL(file)
   }
 
-  const guard = () => { const e = validate(s); setErrors(e); if (e.length) show(e[0], 'error'); return !e.length }
+  const guard = () => { const e = validate(s); setErrors(e); if (e.length) { show(`Please fix ${e.length} issue(s) first: ${e[0]}`, 'error'); window.scrollTo({ top: 0, behavior: 'smooth' }) } return !e.length }
   const run = async (fn) => {
     setBusy(true)
     try { await new Promise((r) => setTimeout(r, 30)); await fn() }
@@ -80,7 +80,7 @@ export default function App() {
     finally { setBusy(false) }
   }
 
-  const generate = () => { if (guard()) { setGenerated(true); show('Invoice generated. Download, print or email it.') } }
+  const generate = () => { if (guard()) { setGenerated(true); show('Invoice ready. Download, print or email it.'); document.getElementById('invoice')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } }
   const download = () => guard() && run(async () => { buildPdf(s).save(fname); show('PDF downloaded.') })
   const print = () => guard() && window.print()
   const openMail = () => {
@@ -117,9 +117,9 @@ export default function App() {
 
       <div className="actions">
         <button className="btn primary" onClick={generate}>Generate Invoice</button>
-        <button className="btn" disabled={!generated || busy} onClick={download}>{busy ? 'Generating…' : 'Download PDF'}</button>
-        <button className="btn" disabled={!generated} onClick={print}>Print</button>
-        <button className="btn" disabled={!generated} onClick={openMail}>Send by Email</button>
+        <button className="btn" disabled={busy} onClick={download}>{busy ? 'Generating…' : 'Download PDF'}</button>
+        <button className="btn" onClick={print}>Print</button>
+        <button className="btn" onClick={openMail}>Send by Email</button>
         <span className="sp" />
         <button className="btn ghost" onClick={saveDraft}>Save Draft</button>
         <button className="btn ghost" onClick={restoreDraft}>Restore Draft</button>
