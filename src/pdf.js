@@ -2,97 +2,35 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { calc, fmt, num } from './calc'
 
-const THEME = {
-  classic: { font: 'times', accent: [30, 41, 59], head: [241, 245, 249], headText: [30, 41, 59], theme: 'grid' },
-  modern: { font: 'helvetica', accent: [79, 70, 229], head: [79, 70, 229], headText: [255, 255, 255], theme: 'striped' },
-  minimal: { font: 'helvetica', accent: [0, 0, 0], head: [255, 255, 255], headText: [0, 0, 0], theme: 'plain' }
-}
-const addr = (p) => [p.address, [p.city, p.state, p.zip].filter(Boolean).join(', '), p.country].filter(Boolean)
-const date = (v) => v ? new Date(v + 'T00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+const date = v => v ? new Date(v + 'T00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+const addr = p => [p.address, [p.city,p.state,p.zip].filter(Boolean).join(', '), p.country].filter(Boolean)
 
-// Real vector PDF (A4), drawn with jsPDF — not a screenshot of the page.
 export function buildPdf(s) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-  const T = THEME[s.template], c = calc(s), f = (n) => fmt(n, s.inv.currency, true)
-  const { biz, cust, inv, pay } = s
-  const M = 15, R = 195
-  let y = M
-
-  const txt = (t, x, yy, o = {}) => {
-    doc.setFont(T.font, o.b ? 'bold' : 'normal')
-    doc.setFontSize(o.size || 9)
-    doc.setTextColor(...(o.color || [40, 40, 40]))
-    doc.text(String(t), x, yy, { align: o.align || 'left' })
-  }
-  const need = (h) => { if (y + h > 285) { doc.addPage(); y = M } }
-  const block = (title, lines) => {
-    if (!lines.length) return
-    need(12); txt(title, M, y, { b: 1, size: 8, color: T.accent }); y += 5
-    lines.forEach((l) => { need(5); txt(l, M, y); y += 4.5 })
-    y += 4
-  }
-
-  // Header: business (left) / invoice meta (right)
-  let ly = M, lo = 0
-  if (biz.logo) {
-    const ratio = biz.logo.w / biz.logo.h, w = Math.min(22 * ratio, 55), h = w / ratio
-    doc.addImage(biz.logo.src, 'PNG', R - w, M, w, h); lo = h + 3
-  }
-  txt(biz.name, M, ly + 4, { b: 1, size: 13 }); ly += 9
-  ;[...addr(biz), [biz.phone, biz.email, biz.website].filter(Boolean).join(' | '),
-    biz.gstin && `GSTIN: ${biz.gstin}`, biz.pan && `PAN: ${biz.pan}`].filter(Boolean)
-    .forEach((l) => { txt(l, M, ly); ly += 4.5 })
-
-  txt('INVOICE', R, M + 6 + lo, { b: 1, size: 22, align: 'right', color: T.accent })
-  let ry = M + 14 + lo
-  ;[`#${inv.number}`, `Date: ${date(inv.date)}`, inv.due && `Due: ${date(inv.due)}`,
-    inv.po && `PO: ${inv.po}`, inv.ref && `Ref: ${inv.ref}`].filter(Boolean)
-    .forEach((l) => { txt(l, R, ry, { align: 'right' }); ry += 5 })
-
-  y = Math.max(ly, ry) + 3
-  doc.setDrawColor(...T.accent); doc.line(M, y, R, y); y += 7
-
-  // Bill to
-  txt('BILL TO', M, y, { b: 1, size: 8, color: T.accent }); y += 5
-  txt(cust.name, M, y, { b: 1, size: 10 }); y += 5
-  ;[cust.company, ...addr(cust), [cust.email, cust.phone].filter(Boolean).join(' | '),
-    cust.gstin && `GSTIN: ${cust.gstin}`].filter(Boolean)
-    .forEach((l) => { txt(l, M, y); y += 4.5 })
-  y += 5
-
-  // Items
-  autoTable(doc, {
-    startY: y, margin: { left: M, right: M }, theme: T.theme,
-    head: [['Item', 'Qty', 'Rate', 'Disc %', 'Tax %', 'Amount']],
-    body: c.rows.map((r) => [
-      r.name + (r.desc ? '\n' + r.desc : ''), r.qty, f(num(r.rate)),
-      num(r.discount), s.taxMode === 'none' ? '-' : num(r.tax), f(r.amount)
-    ]),
-    styles: { font: T.font, fontSize: 9, cellPadding: 2.5, textColor: [40, 40, 40], lineColor: [210, 214, 220] },
-    headStyles: { fillColor: T.head, textColor: T.headText, fontStyle: 'bold' },
-    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } }
-  })
-  y = doc.lastAutoTable.finalY + 7
-
-  // Totals
-  const rows = [['Subtotal', f(c.sub)], ['Discount', f(-c.disc)], ...c.taxLines.map((l) => [l.label, f(l.amount)])]
-  if (num(s.extra.shipping)) rows.push(['Shipping', f(num(s.extra.shipping))])
-  if (num(s.extra.other)) rows.push(['Other Charges', f(num(s.extra.other))])
-  if (num(s.extra.roundOff)) rows.push(['Round Off', f(num(s.extra.roundOff))])
-  rows.forEach(([l, v]) => { need(6); txt(l, 130, y); txt(v, R, y, { align: 'right' }); y += 5.5 })
-  need(12); doc.line(130, y - 2, R, y - 2); y += 3
-  txt('GRAND TOTAL', 130, y, { b: 1, size: 11, color: T.accent })
-  txt(f(c.grand), R, y, { b: 1, size: 11, align: 'right', color: T.accent }); y += 12
-
-  // Footer blocks
-  if (s.payOn) {
-    block('PAYMENT DETAILS', [
-      pay.bank && `Bank: ${pay.bank}`, pay.accName && `Account Name: ${pay.accName}`,
-      pay.accNo && `Account No: ${pay.accNo}`, pay.ifsc && `IFSC: ${pay.ifsc}`,
-      pay.upi && `UPI: ${pay.upi}`, ...(pay.instr ? doc.splitTextToSize(pay.instr, R - M) : [])
-    ].filter(Boolean))
-  }
-  if (s.notes) block('NOTES', doc.splitTextToSize(s.notes, R - M))
-  if (s.terms) block('TERMS & CONDITIONS', doc.splitTextToSize(s.terms, R - M))
+  const doc = new jsPDF({ unit:'mm', format:'a4' })
+  const c = calc(s), f = n => fmt(n, s.inv.currency, true), { biz, cust, inv, pay } = s
+  const M=15, R=195
+  let y=M
+  const text=(t,x,yy,o={})=>{doc.setFont('helvetica',o.b?'bold':'normal');doc.setFontSize(o.size||9);doc.setTextColor(...(o.color||[40,40,40]));doc.text(String(t),x,yy,{align:o.align||'left'})}
+  const lines=(arr,x,yy,step=4.2)=>{arr.filter(Boolean).forEach(v=>{text(v,x,yy);yy+=step});return yy}
+  let leftY=M+3
+  if(biz.logo){const ratio=biz.logo.w/biz.logo.h;const w=Math.min(45,25*ratio),h=w/ratio;doc.addImage(biz.logo.src,'PNG',M,leftY,w,h);leftY+=h+6}
+  text(biz.name||'YOUR BUSINESS',M,leftY,{b:1,size:13});leftY+=6
+  leftY=lines([...addr(biz),[biz.phone,biz.email,biz.website].filter(Boolean).join(' · '),biz.gstin&&`GSTIN: ${biz.gstin}`,biz.pan&&`PAN: ${biz.pan}`],M,leftY)
+  text('INVOICE',R,M+8,{b:1,size:24,align:'right'})
+  let ry=M+16
+  ;[[`Invoice No.`,`#${inv.number}`],[`Invoice Date`,date(inv.date)],inv.due&&[`Due Date`,date(inv.due)],inv.po&&[`PO Number`,inv.po],inv.ref&&[`Reference`,inv.ref]].filter(Boolean).forEach(([a,b])=>{text(a,150,ry,{size:8,color:[110,110,110]});text(b,R,ry,{align:'right',size:8});ry+=4.8})
+  y=Math.max(leftY,ry)+8;doc.setDrawColor(190,190,184);doc.line(M,y,R,y);y+=10
+  text('BILLED TO',M,y,{b:1,size:8,color:[110,110,110]});y+=5;text(cust.name||'Customer Name',M,y,{b:1,size:10});y+=5;y=lines([cust.company,...addr(cust),[cust.email,cust.phone].filter(Boolean).join(' · '),cust.gstin&&`GSTIN: ${cust.gstin}`],M,y);y+=7
+  autoTable(doc,{startY:y,margin:{left:M,right:M},theme:'plain',head:[['ITEM / DESCRIPTION','HSN/SAC','QTY','RATE','DISC.','TAX','AMOUNT']],body:c.rows.map(r=>[r.name+(r.desc?'\n'+r.desc:''),r.hsn||'—',r.qty,f(r.rate),`${num(r.discount)}%`,s.taxMode==='none'?'—':`${num(r.tax)}%`,f(r.amount)]),styles:{font:'helvetica',fontSize:8.5,cellPadding:2.7,textColor:[35,35,35],lineColor:[225,225,220],lineWidth:.15},headStyles:{fillColor:[245,245,242],textColor:[90,90,90],fontStyle:'bold',lineColor:[210,210,205],lineWidth:.2},columnStyles:{0:{halign:'left',cellWidth:72},1:{halign:'right',cellWidth:20},2:{halign:'right'},3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},6:{halign:'right',cellWidth:27}}})
+  y=doc.lastAutoTable.finalY+9
+  if(s.payOn){text('PAYMENT DETAILS',M,y,{b:1,size:8,color:[110,110,110]});let py=y+5;py=lines([pay.bank&&`Bank: ${pay.bank}`,pay.accName&&`Account Name: ${pay.accName}`,pay.accNo&&`Account No.: ${pay.accNo}`,pay.ifsc&&`IFSC: ${pay.ifsc}`,pay.upi&&`UPI: ${pay.upi}`],M,py);if(pay.instr)py+=1; y=Math.max(y,py)}
+  let ty=Math.max(y,doc.lastAutoTable.finalY+9)
+  const totals=[['Subtotal',f(c.sub)],c.disc>0?['Discount',`- ${f(c.disc)}`]:null,...c.taxLines.map(l=>[l.label,f(l.amount)]),num(s.extra.shipping)?['Shipping',f(num(s.extra.shipping))]:null,num(s.extra.other)?['Other Charges',f(num(s.extra.other))]:null,num(s.extra.roundOff)!==0?['Round Off',f(num(s.extra.roundOff))]:null].filter(Boolean)
+  let sy=doc.lastAutoTable.finalY+9
+  totals.forEach(([a,b])=>{text(a,145,sy,{size:8,color:[90,90,90]});text(b,R,sy,{align:'right',size:8});sy+=4.8})
+  doc.setDrawColor(180,180,175);doc.line(145,sy-1,R,sy-1);sy+=4;text('GRAND TOTAL',145,sy,{b:1,size:10});text(f(c.grand),R,sy,{b:1,size:10,align:'right'});y=Math.max(y,sy+8)
+  if(s.notes){text('NOTES',M,y,{b:1,size:8,color:[110,110,110]});y+=5;lines(doc.splitTextToSize(s.notes,82),M,y);y+=10}
+  if(s.terms){text('TERMS & CONDITIONS',105,y,{b:1,size:8,color:[110,110,110]});lines(doc.splitTextToSize(s.terms,85),105,y+5)}
+  doc.setDrawColor(210,210,205);doc.line(M,280,R,280);text('T H A N K  Y O U',105,287,{b:1,size:9,align:'center'});text('FOR BEING A PART OF OUR JOURNEY',105,291,{size:6,align:'center',color:[130,130,130]})
   return doc
 }
